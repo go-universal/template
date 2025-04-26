@@ -17,6 +17,9 @@ type Template interface {
 	// Load loads shared templates from the filesystem.
 	Load() error
 
+	// Exists checks if a template exists.
+	Exists(name string) (bool, error)
+
 	// Render renders a template to the provided writer with
 	// the given view, data, and optional layouts.
 	Render(w io.Writer, view string, data interface{}, layouts ...string) error
@@ -123,6 +126,38 @@ func (t *tplEngine) Load() error {
 	}
 
 	return nil
+}
+
+func (t *tplEngine) Exists(name string) (bool, error) {
+	// Reload on development mode
+	if t.option.Dev {
+		if err := t.Load(); err != nil {
+			return false, err
+		}
+	}
+
+	// Resolve and normalize view
+	view := toPath(name, t.option.root, t.option.extension)
+	viewId := toName(view, t.option.root, t.option.extension)
+	key := toKey(viewId)
+
+	// Safe race condition
+	t.mutex.RLock()
+	defer t.mutex.RUnlock()
+
+	// Check if template exists in rendered templates
+	if _, ok := t.templates[key]; ok {
+		return true, nil
+	}
+
+	// Check if template exists in the filesystem
+	if _, err := t.fs.ReadFile(view); os.IsNotExist(err) {
+		return false, nil
+	} else if err != nil {
+		return false, err
+	}
+
+	return true, nil
 }
 
 func (t *tplEngine) Render(w io.Writer, name string, data interface{}, layouts ...string) error {
